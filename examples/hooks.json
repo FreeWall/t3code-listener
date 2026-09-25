@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "hooks": [
+    {
+      "event": "turn.completed",
+      "command": "notify-send 'T3 Code' \"$T3_THREAD_TITLE finished\""
+    },
+    {
+      "event": "turn.failed",
+      "command": "notify-send -u critical 'T3 Code' \"$T3_THREAD_TITLE failed\""
+    },
+    {
+      "event": "turn.cancelled",
+      "command": "notify-send 'T3 Code' \"$T3_THREAD_TITLE stopped\""
+    },
+    {
+      "event": "input.requested",
+      "command": "notify-send -u critical 'T3 Code' \"$T3_THREAD_TITLE needs input ($T3_INPUT_KIND)\"",
+      "match": { "kind": "user_input" }
+    },
+    {
+      "event": "input.requested",
+      "command": "notify-send -u critical 'T3 Code' \"$T3_THREAD_TITLE needs approval\"",
+      "match": { "kind": "permission" }
+    },
+    {
+      "event": "input.requested",
+      "command": "notify-send -u critical 'T3 Code' \"$T3_THREAD_TITLE has a plan to review\"",
+      "match": { "kind": "plan_review" }
+    }
+  ]
+}

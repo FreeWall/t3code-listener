@@ -1,0 +1,22 @@
+{
+  "name": "t3code-listener",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Minimal external listener for T3 Code orchestration shell events.",
+  "scripts": {
+    "start": "node src/index.ts",
+    "smoke": "node scripts/smoke.ts",
+    "smoke:hooks": "node scripts/hooks-smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.2"
+  },
+  "workspaces": []
+}

@@ -1,0 +1,16 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "type": "shell",
+        "label": "start",
+        "detail": "yarn start",
+        "problemMatcher": [],
+        "command": "yarn start --url http://127.0.0.1:3774",
+        "icon": {
+          "id": "run",
+          "color": "terminal.ansiGreen"
+        }
+      }
+    ]
+  }
