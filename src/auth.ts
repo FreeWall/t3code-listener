@@ -10,7 +10,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
  * Must match the server's orchestration protocol version. The /ws upgrade is
  * rejected with HTTP 426 when the `orchestrationProtocol` query param differs.
  */
-export const ORCHESTRATION_PROTOCOL_VERSION = 2;
+const ORCHESTRATION_PROTOCOL_VERSION = 2;
 
 export class AuthError extends Error {
   readonly status: number | undefined;
@@ -24,12 +24,6 @@ export class AuthError extends Error {
 /** An auth failure that retrying cannot fix (bad/expired session, no credential to re-pair). */
 export class FatalAuthError extends AuthError {}
 
-export interface AccessToken {
-  readonly accessToken: string;
-  readonly expiresIn: number;
-  readonly scope: string;
-}
-
 function describeFailure(status: number, body: string): string {
   const trimmed = body.trim();
   return trimmed === "" ? `HTTP ${status}` : `HTTP ${status}: ${trimmed.slice(0, 500)}`;
@@ -40,7 +34,10 @@ function describeFailure(status: number, body: string): string {
  * (RFC 8693 token exchange). Omitting `scope` makes the server use the scopes
  * granted to the pairing link, which for a read-only link is `orchestration:read`.
  */
-export async function exchangePairingToken(config: ListenerConfig): Promise<AccessToken> {
+export async function exchangePairingToken(config: ListenerConfig): Promise<{
+  readonly accessToken: string;
+  readonly expiresAt: number | undefined;
+}> {
   if (config.credential === undefined) {
     throw new AuthError("No pairing credential to exchange.");
   }
@@ -68,15 +65,14 @@ export async function exchangePairingToken(config: ListenerConfig): Promise<Acce
   const parsed = JSON.parse(text) as {
     access_token?: unknown;
     expires_in?: unknown;
-    scope?: unknown;
   };
   if (typeof parsed.access_token !== "string" || parsed.access_token === "") {
     throw new AuthError("Pairing exchange response is missing access_token.");
   }
+  const expiresIn = typeof parsed.expires_in === "number" ? parsed.expires_in : 0;
   return {
     accessToken: parsed.access_token,
-    expiresIn: typeof parsed.expires_in === "number" ? parsed.expires_in : 0,
-    scope: typeof parsed.scope === "string" ? parsed.scope : "",
+    expiresAt: expiresIn > 0 ? Date.now() + expiresIn * 1000 : undefined,
   };
 }
 

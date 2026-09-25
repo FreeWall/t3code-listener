@@ -1,4 +1,4 @@
-export type JsonRecord = Record<string, unknown>;
+type JsonRecord = Record<string, unknown>;
 
 export function asRecord(value: unknown): JsonRecord | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)

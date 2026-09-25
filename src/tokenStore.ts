@@ -1,12 +1,10 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import type { AccessToken } from "./auth.ts";
 import type { ListenerConfig } from "./config.ts";
 
-export interface StoredSession {
+interface StoredSession {
   readonly accessToken: string;
-  readonly scope: string;
   readonly expiresAt: number;
 }
 
@@ -46,15 +44,6 @@ export function readCachedToken(config: ListenerConfig): StoredSession | undefin
     return undefined;
   }
   return session;
-}
-
-export function writeCachedToken(config: ListenerConfig, token: AccessToken): void {
-  if (token.expiresIn <= 0) return;
-  writeCachedSession(config, {
-    accessToken: token.accessToken,
-    scope: token.scope,
-    expiresAt: Date.now() + token.expiresIn * 1000,
-  });
 }
 
 export function writeCachedSession(config: ListenerConfig, session: StoredSession): void {

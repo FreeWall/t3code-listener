@@ -125,7 +125,7 @@ state, so reconnects do not re-fire hooks for work that was already pending.
 
 `turn.completed` tracks the run status, not thread settlement (`settledAt`). Settlement can lag behind
 generation while background work drains, so a settled thread with no completed run does not fire it. The payload
-still includes `thread.settledAt` and `turn.settledAt` for context.
+still includes `thread.settledAt` for context.
 
 Each hook takes:
 
@@ -149,11 +149,8 @@ See [`examples/hooks.json`](examples/hooks.json) for a ready-to-copy desktop-not
 
 ## Output
 
-```
-snapshot seq=42 projects=2 threads=5 archived=0
-  a1b2c3d4 [e5f6a7b8] "Fix the flaky test" status=running active
-thread.updated seq=57 active a1b2c3d4 [e5f6a7b8] "Fix the flaky test" status=waiting pending:user_input
-```
+The listener is silent during normal operation: shell events are consumed internally and hooks are the output.
+Errors (bad credentials, unreadable hooks file, failed or timed-out hook) still go to stderr.
 
 The listener reconnects with `afterSequence` set to the highest sequence it has seen, so it resumes
 without re-downloading the whole snapshot. A stale cursor makes the server send a fresh snapshot instead.
@@ -174,8 +171,8 @@ public SDK contract, so expect to pin to a server version.
 ## Verification
 
 `yarn smoke` runs the stream handling against an in-memory RPC server (no T3 instance or credentials
-needed) and asserts the snapshot, update, cursor, and formatting paths. `yarn smoke:hooks` asserts hook edge
-detection and command dispatch.
+needed) and asserts the stream and cursor paths. `yarn smoke:hooks` asserts hook edge detection and command
+dispatch.
 
 ```bash
 yarn typecheck
@@ -188,8 +185,8 @@ yarn smoke:hooks
 - `src/config.ts` - CLI/env parsing and URL normalization.
 - `src/auth.ts` - pairing exchange, WebSocket ticket, `/ws` URL.
 - `src/tokenStore.ts` - bearer token cache (read/write/clear, `0600`).
-- `src/protocol.ts` - minimal `orchestration.subscribeShell` RPC group.
-- `src/format.ts` - shell item to printable line and resume cursor.
+- `src/protocol.ts` - minimal `orchestration.subscribeShell` RPC group and resume cursor.
+- `src/json.ts` - small JSON narrowing helpers.
 - `src/hooks.ts` - hook config, transition detection, matching, command runner.
 - `src/index.ts` - connect, subscribe, reconnect loop.
 - `scripts/smoke.ts` - serverless end-to-end check.

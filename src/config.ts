@@ -31,12 +31,12 @@ function configDir(): string {
 }
 
 /** Default token cache path: $XDG_CONFIG_HOME/t3code-listener/sessions.json. */
-export function defaultTokenFile(): string {
+function defaultTokenFile(): string {
   return NodePath.join(configDir(), "sessions.json");
 }
 
 /** Default hooks path: $XDG_CONFIG_HOME/t3code-listener/hooks.json. */
-export function defaultHooksFile(): string {
+function defaultHooksFile(): string {
   return NodePath.join(configDir(), "hooks.json");
 }
 

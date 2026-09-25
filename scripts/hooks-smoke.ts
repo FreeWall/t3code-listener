@@ -3,7 +3,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 
-import { createHookRuntime, loadHooks } from "../src/hooks.ts";
+import { createHookRuntime } from "../src/hooks.ts";
 
 const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3ls-hooks-"));
 const out = NodePath.join(dir, "events.txt");
@@ -81,7 +81,7 @@ const items = [
   { kind: "thread.updated", sequence: 10, location: "active", thread: thread({ status: "cancelled" }) },
 ];
 
-const runtime = createHookRuntime(loadHooks(hooksFile));
+const runtime = createHookRuntime(hooksFile);
 
 const program = Effect.gen(function* () {
   for (const item of items) {

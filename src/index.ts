@@ -16,15 +16,9 @@ import {
   issueWebSocketTicket,
 } from "./auth.ts";
 import { ConfigError, resolveConfig, usage } from "./config.ts";
-import { describeItem, sequenceOf } from "./format.ts";
-import { createHookRuntime, loadHooks, type HookRuntime } from "./hooks.ts";
-import { ListenerRpcGroup, SUBSCRIBE_SHELL_TAG } from "./protocol.ts";
-import {
-  clearCachedToken,
-  readCachedToken,
-  writeCachedSession,
-  writeCachedToken,
-} from "./tokenStore.ts";
+import { createHookRuntime, type HookRuntime } from "./hooks.ts";
+import { ListenerRpcGroup, SUBSCRIBE_SHELL_TAG, sequenceOf } from "./protocol.ts";
+import { clearCachedToken, readCachedToken, writeCachedSession } from "./tokenStore.ts";
 
 const RECONNECT_DELAY = "2 seconds";
 
@@ -59,11 +53,6 @@ async function acquireBearer(forcePair: boolean): Promise<string> {
     if (cached !== undefined) {
       bearer = cached.accessToken;
       bearerSource = "cache";
-      console.log(
-        `using cached session for ${config.httpBaseUrl} (expires ${new Date(
-          cached.expiresAt,
-        ).toISOString()})`,
-      );
       return bearer;
     }
   }
@@ -75,8 +64,9 @@ async function acquireBearer(forcePair: boolean): Promise<string> {
   const token = await exchangePairingToken(config);
   bearer = token.accessToken;
   bearerSource = "pairing";
-  if (config.persistToken) writeCachedToken(config, token);
-  console.log(`paired: scope="${token.scope}" expires_in=${token.expiresIn}s`);
+  if (config.persistToken && token.expiresAt !== undefined) {
+    writeCachedSession(config, { accessToken: token.accessToken, expiresAt: token.expiresAt });
+  }
   return bearer;
 }
 
@@ -91,7 +81,7 @@ function cacheExplicitBearer(): void {
   if (expiresAt === undefined) return;
   const existing = readCachedToken(config);
   if (existing !== undefined && existing.accessToken === token) return;
-  writeCachedSession(config, { accessToken: token, scope: "explicit", expiresAt });
+  writeCachedSession(config, { accessToken: token, expiresAt });
 }
 
 /** Issues a WebSocket ticket, re-pairing once if a cached session was revoked. */
@@ -102,7 +92,6 @@ async function openTicket(): Promise<string> {
   } catch (error) {
     if (error instanceof AuthError && error.status === 401) {
       if (bearerSource !== "explicit" && config.credential !== undefined) {
-        console.warn("cached session was rejected; re-pairing");
         if (config.persistToken) clearCachedToken(config);
         const fresh = await acquireBearer(true);
         return issueWebSocketTicket(config, fresh);
@@ -116,11 +105,10 @@ async function openTicket(): Promise<string> {
 }
 
 /**
- * Opens one authenticated WebSocket, subscribes to the shell stream, and prints
- * events until the connection or the stream ends. The caller reconnects with the
- * cursor advanced by this run.
+ * Opens one authenticated WebSocket and runs the shell stream until the connection
+ * ends. The caller reconnects with the cursor advanced by this run.
  */
-function runSubscription(cursor: Ref.Ref<number | undefined>, hooks: HookRuntime | undefined) {
+function runSubscription(cursor: Ref.Ref<number | undefined>, hooks: HookRuntime) {
   return Effect.gen(function* () {
     const ticket = yield* Effect.promise(() => openTicket());
     const socketUrl = buildWebSocketUrl(config.wsBaseUrl, ticket);
@@ -134,11 +122,6 @@ function runSubscription(cursor: Ref.Ref<number | undefined>, hooks: HookRuntime
     const body = Effect.gen(function* () {
       const client = yield* RpcClient.make(ListenerRpcGroup);
       const afterSequence = yield* Ref.get(cursor);
-      console.log(
-        afterSequence === undefined
-          ? "subscribed: requesting full shell snapshot"
-          : `subscribed: resuming after sequence ${afterSequence}`,
-      );
       yield* client[SUBSCRIBE_SHELL_TAG]({
         ...(afterSequence === undefined ? {} : { afterSequence }),
         requestCompletionMarker: true,
@@ -151,8 +134,7 @@ function runSubscription(cursor: Ref.Ref<number | undefined>, hooks: HookRuntime
                 current === undefined ? sequence : Math.max(current, sequence),
               );
             }
-            yield* Effect.sync(() => console.log(describeItem(item)));
-            if (hooks !== undefined) yield* hooks.handleItem(item);
+            yield* hooks.handleItem(item);
           }),
         ),
       );
@@ -172,30 +154,18 @@ function findFatalAuthError(cause: Cause.Cause<unknown>): FatalAuthError | undef
 
 const program = Effect.gen(function* () {
   const cursor = yield* Ref.make<number | undefined>(undefined);
-  const hookDefinitions = loadHooks(config.hooksFile);
-  const hooks = hookDefinitions.length === 0 ? undefined : createHookRuntime(hookDefinitions);
-  console.log(`listening: ${config.httpBaseUrl} -> ${config.wsBaseUrl}ws`);
-  console.log(
-    hookDefinitions.length === 0
-      ? `hooks: none (${config.hooksFile})`
-      : `hooks: ${hookDefinitions.length} from ${config.hooksFile}`,
-  );
+  const hooks = createHookRuntime(config.hooksFile);
   if (!config.reconnect) {
     yield* runSubscription(cursor, hooks);
     return;
   }
   yield* Effect.forever(
     runSubscription(cursor, hooks).pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause) || findFatalAuthError(cause) !== undefined) {
-          return Effect.failCause(cause);
-        }
-        return Effect.sync(() =>
-          console.warn(
-            `disconnected (${Cause.pretty(cause).split("\n")[0]}); reconnecting in ${RECONNECT_DELAY}`,
-          ),
-        );
-      }),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause) || findFatalAuthError(cause) !== undefined
+          ? Effect.failCause(cause)
+          : Effect.void,
+      ),
       Effect.delay(RECONNECT_DELAY),
     ),
   );

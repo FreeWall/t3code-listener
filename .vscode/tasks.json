@@ -6,7 +6,7 @@
         "label": "start",
         "detail": "yarn start",
         "problemMatcher": [],
-        "command": "yarn start --url http://127.0.0.1:3774",
+        "command": "yarn start --url http://127.0.0.1:3773",
         "icon": {
           "id": "run",
           "color": "terminal.ansiGreen"

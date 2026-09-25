@@ -14,13 +14,13 @@ import { asBoolean, asNumber, asRecord, asString, nested } from "./json.ts";
  * behind generation while background work drains. `turn.failed` and `turn.cancelled`
  * cover the other terminal run statuses.
  */
-export const HOOK_EVENTS = [
+const HOOK_EVENTS = [
   "turn.completed",
   "turn.failed",
   "turn.cancelled",
   "input.requested",
 ] as const;
-export type HookEventName = (typeof HOOK_EVENTS)[number];
+type HookEventName = (typeof HOOK_EVENTS)[number];
 
 /** Terminal run statuses that are not success or failure. */
 const CANCELLED_STATUSES: ReadonlySet<string> = new Set([
@@ -39,7 +39,6 @@ const HookMatchSchema = Schema.Struct({
   /** JavaScript regular expression tested against the thread title. */
   titlePattern: Schema.optional(Schema.String),
 });
-export type HookMatch = Schema.Schema.Type<typeof HookMatchSchema>;
 
 const HookDefinitionSchema = Schema.Struct({
   event: Schema.Literals([...HOOK_EVENTS, "*"]),
@@ -47,14 +46,14 @@ const HookDefinitionSchema = Schema.Struct({
   match: Schema.optional(HookMatchSchema),
   timeoutMs: Schema.optional(Schema.Number),
 });
-export type HookDefinition = Schema.Schema.Type<typeof HookDefinitionSchema>;
+type HookDefinition = Schema.Schema.Type<typeof HookDefinitionSchema>;
 
 const HookConfigSchema = Schema.Struct({
   version: Schema.optional(Schema.Literal(1)),
   hooks: Schema.Array(HookDefinitionSchema),
 });
 
-export interface ThreadState {
+interface ThreadState {
   readonly status: string;
   readonly settledAt: string | null;
   readonly pendingRequestId: string | null;
@@ -62,7 +61,7 @@ export interface ThreadState {
   readonly actionablePlan: boolean;
 }
 
-export interface HookPayload {
+interface HookPayload {
   readonly event: HookEventName;
   readonly sequence: number | undefined;
   readonly timestamp: string;
@@ -75,11 +74,10 @@ export interface HookPayload {
     readonly settledAt: string | null;
   };
   readonly input?: { readonly kind: string; readonly requestId: string | null };
-  readonly turn?: { readonly status: string; readonly settledAt: string | null };
 }
 
 /** Reads and validates the hooks file. Missing file means no hooks; invalid content is reported once. */
-export function loadHooks(file: string): ReadonlyArray<HookDefinition> {
+function loadHooks(file: string): ReadonlyArray<HookDefinition> {
   let text: string;
   try {
     text = NodeFS.readFileSync(file, "utf8");
@@ -97,7 +95,7 @@ export function loadHooks(file: string): ReadonlyArray<HookDefinition> {
   }
 }
 
-export function threadState(thread: unknown): ThreadState {
+function threadState(thread: unknown): ThreadState {
   const pending = asRecord(nested(thread, "pendingRuntimeRequest"));
   return {
     status: asString(nested(thread, "status")) ?? "unknown",
@@ -117,7 +115,7 @@ interface DetectionContext {
 }
 
 /** Computes hook events from a thread's previous and current shell state. */
-export function detectHookEvents(
+function detectHookEvents(
   previous: ThreadState | undefined,
   current: ThreadState,
   context: DetectionContext,
@@ -134,7 +132,6 @@ export function detectHookEvents(
       status: current.status,
       settledAt: current.settledAt,
     },
-    turn: { status: current.status, settledAt: current.settledAt },
   } satisfies Omit<HookPayload, "event">;
 
   const requestAppeared =
@@ -172,7 +169,7 @@ export function detectHookEvents(
   return events;
 }
 
-export function matchesHook(hook: HookDefinition, payload: HookPayload): boolean {
+function matchesHook(hook: HookDefinition, payload: HookPayload): boolean {
   if (hook.event !== "*" && hook.event !== payload.event) return false;
   const match = hook.match;
   if (match === undefined) return true;
@@ -196,7 +193,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * Runs one hook command with the payload on stdin and `T3_*` variables in the
  * environment. Commands run detached from the stream so a slow hook cannot stall it.
  */
-export function runHook(hook: HookDefinition, payload: HookPayload): Promise<void> {
+function runHook(hook: HookDefinition, payload: HookPayload): Promise<void> {
   const timeoutMs = hook.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -210,7 +207,6 @@ export function runHook(hook: HookDefinition, payload: HookPayload): Promise<voi
     T3_SEQUENCE: payload.sequence === undefined ? "" : String(payload.sequence),
     T3_TIMESTAMP: payload.timestamp,
   };
-  console.log(`hook ${payload.event}: ${hook.command}`);
   return new Promise((resolve) => {
     const child = spawn(hook.command, { shell: true, env, stdio: ["pipe", "inherit", "inherit"] });
     let settled = false;
@@ -246,16 +242,19 @@ export interface HookRuntime {
 }
 
 /**
- * Tracks per-thread shell state so hooks fire on transitions rather than on every
- * update. A snapshot seeds state without firing, which keeps reconnects quiet.
+ * Loads hooks and returns a runtime that tracks per-thread shell state, so hooks fire
+ * on transitions rather than on every update. A snapshot seeds state without firing,
+ * which keeps reconnects quiet.
  */
-export function createHookRuntime(hooks: ReadonlyArray<HookDefinition>): HookRuntime {
+export function createHookRuntime(file: string): HookRuntime {
+  const hooks = loadHooks(file);
   const threadStates = new Map<string, ThreadState>();
   const projects = new Map<string, { readonly id: string; readonly title: string }>();
 
   return {
     handleItem: (item) =>
       Effect.gen(function* () {
+        if (hooks.length === 0) return;
         const record = asRecord(item);
         const kind = asString(record?.kind);
 

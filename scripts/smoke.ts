@@ -3,8 +3,7 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/unstable/rpc/RpcTest";
 
-import { describeItem, sequenceOf } from "../src/format.ts";
-import { ListenerRpcGroup, SUBSCRIBE_SHELL_TAG } from "../src/protocol.ts";
+import { ListenerRpcGroup, SUBSCRIBE_SHELL_TAG, sequenceOf } from "../src/protocol.ts";
 
 const snapshot = {
   kind: "snapshot",
@@ -49,7 +48,7 @@ const handlers = ListenerRpcGroup.toLayer({
 const program = Effect.gen(function* () {
   const client = yield* RpcTest.makeClient(ListenerRpcGroup);
   const cursor = yield* Ref.make<number | undefined>(undefined);
-  const lines: Array<string> = [];
+  const seen = yield* Ref.make(0);
   yield* client[SUBSCRIBE_SHELL_TAG]({ requestCompletionMarker: true }).pipe(
     Stream.runForEach((item) =>
       Effect.gen(function* () {
@@ -59,15 +58,13 @@ const program = Effect.gen(function* () {
             current === undefined ? sequence : Math.max(current, sequence),
           );
         }
-        const line = describeItem(item);
-        lines.push(line);
-        yield* Effect.sync(() => console.log(line));
+        yield* Ref.update(seen, (count) => count + 1);
       }),
     ),
   );
   const finalCursor = yield* Ref.get(cursor);
   if (finalCursor !== 11) throw new Error(`expected cursor 11, got ${finalCursor}`);
-  if (lines.length !== 3) throw new Error(`expected 3 lines, got ${lines.length}`);
+  if ((yield* Ref.get(seen)) !== 3) throw new Error("expected 3 items");
   console.log("SMOKE_OK");
 });
 
