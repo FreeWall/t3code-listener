@@ -10,6 +10,7 @@ const out = NodePath.join(dir, "events.txt");
 const hooksFile = NodePath.join(dir, "hooks.json");
 
 const command = `printf '%s|%s|%s\\n' "$T3_EVENT" "$T3_INPUT_KIND" "$T3_THREAD_TITLE" >> "${out}"`;
+const subagentCommand = `printf 'subagent|%s|%s|%s\\n' "$T3_EVENT" "$T3_PARENT_THREAD_ID" "$T3_THREAD_RELATIONSHIP" >> "${out}"`;
 NodeFS.writeFileSync(
   hooksFile,
   JSON.stringify(
@@ -17,7 +18,8 @@ NodeFS.writeFileSync(
       version: 1,
       hooks: [
         { event: "input.requested", command },
-        { event: "turn.completed", command },
+        { event: "turn.completed", command, match: { subagent: false } },
+        { event: "turn.completed", command: subagentCommand, match: { subagent: true } },
         { event: "turn.failed", command },
         { event: "turn.cancelled", command },
       ],
@@ -35,8 +37,18 @@ const thread = (overrides: Record<string, unknown>) => ({
   settledAt: null,
   hasActionableProposedPlan: false,
   pendingRuntimeRequest: null,
+  lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "t1" },
   ...overrides,
 });
+
+const subagentThread = (overrides: Record<string, unknown>) =>
+  thread({
+    id: "t2",
+    title: "Subagent",
+    creationSource: "provider",
+    lineage: { parentThreadId: "t1", relationshipToParent: "subagent", rootThreadId: "t1" },
+    ...overrides,
+  });
 
 const snapshot = {
   kind: "snapshot",
@@ -44,7 +56,7 @@ const snapshot = {
     schemaVersion: 1,
     snapshotSequence: 1,
     projects: [{ id: "p1", title: "Demo project" }],
-    threads: [thread({})],
+    threads: [thread({}), subagentThread({})],
     archivedThreads: [],
   },
 };
@@ -79,6 +91,13 @@ const items = [
   { kind: "thread.updated", sequence: 9, location: "active", thread: thread({ status: "cancelled" }) },
   // Repeating a terminal status must not re-fire.
   { kind: "thread.updated", sequence: 10, location: "active", thread: thread({ status: "cancelled" }) },
+  // A subagent finishing only reaches the `subagent: true` hook.
+  {
+    kind: "thread.updated",
+    sequence: 11,
+    location: "active",
+    thread: subagentThread({ status: "completed" }),
+  },
 ];
 
 const runtime = createHookRuntime(hooksFile);
@@ -99,6 +118,7 @@ const expected = [
   "turn.completed||Demo thread",
   "turn.failed||Demo thread",
   "turn.cancelled||Demo thread",
+  "subagent|turn.completed|t1|subagent",
 ];
 
 console.log(lines.join("\n"));

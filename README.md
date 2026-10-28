@@ -138,10 +138,12 @@ Each hook takes:
 | `match.kind` | Only fire for this `input.kind`. |
 | `match.status` | Only fire when the thread status matches. |
 | `match.titlePattern` | JavaScript regex tested against the thread title. |
+| `match.subagent` | `true`: only subagent threads (`delegate_task` children and native provider subagents). `false`: only non-subagent threads. Omit for both. |
 | `timeoutMs` | Kill the command after this many ms (default 30000). |
 
 The event JSON is written to the command's stdin, and the same fields are exported as `T3_EVENT`,
-`T3_THREAD_ID`, `T3_THREAD_TITLE`, `T3_PROJECT_ID`, `T3_PROJECT_TITLE`, `T3_STATUS`,
+`T3_THREAD_ID`, `T3_THREAD_TITLE`, `T3_PARENT_THREAD_ID`, `T3_THREAD_RELATIONSHIP` (`subagent`, `fork`, or empty),
+`T3_PROJECT_ID`, `T3_PROJECT_TITLE`, `T3_STATUS`,
 `T3_INPUT_KIND`, `T3_SEQUENCE`, and `T3_TIMESTAMP`. Hooks run detached so a slow command never
 blocks the stream; non-zero exits and timeouts are logged.
 

@@ -3,7 +3,8 @@
   "hooks": [
     {
       "event": "turn.completed",
-      "command": "notify-send 'T3 Code' \"$T3_THREAD_TITLE finished\""
+      "command": "notify-send 'T3 Code' \"$T3_THREAD_TITLE finished\"",
+      "match": { "subagent": false }
     },
     {
       "event": "turn.failed",

@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "hooks": [
+      {
+        "event": "turn.completed",
+        "command": "/home/mvanek/projects/nixos-share/configs/flakes/sound-daemon/sound-daemon-play.sh agentDone",
+        "match": { "subagent": false }
+      },
+      {
+        "event": "input.requested",
+        "command": "/home/mvanek/projects/nixos-share/configs/flakes/sound-daemon/sound-daemon-play.sh agentAsks"
+      }
+    ]
+  }

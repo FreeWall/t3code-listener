@@ -38,6 +38,8 @@ const HookMatchSchema = Schema.Struct({
   status: Schema.optional(Schema.String),
   /** JavaScript regular expression tested against the thread title. */
   titlePattern: Schema.optional(Schema.String),
+  /** `true` fires only for subagent threads, `false` only for non-subagent threads. */
+  subagent: Schema.optional(Schema.Boolean),
 });
 
 const HookDefinitionSchema = Schema.Struct({
@@ -72,6 +74,9 @@ interface HookPayload {
     readonly title: string;
     readonly status: string;
     readonly settledAt: string | null;
+    readonly parentThreadId: string | null;
+    /** `lineage.relationshipToParent`: `subagent`, `fork`, or null for a top-level thread. */
+    readonly relationship: string | null;
   };
   readonly input?: { readonly kind: string; readonly requestId: string | null };
 }
@@ -111,6 +116,8 @@ interface DetectionContext {
   readonly location: string;
   readonly threadId: string;
   readonly threadTitle: string;
+  readonly parentThreadId: string | null;
+  readonly relationship: string | null;
   readonly project: { readonly id: string; readonly title: string } | undefined;
 }
 
@@ -131,6 +138,8 @@ function detectHookEvents(
       title: context.threadTitle,
       status: current.status,
       settledAt: current.settledAt,
+      parentThreadId: context.parentThreadId,
+      relationship: context.relationship,
     },
   } satisfies Omit<HookPayload, "event">;
 
@@ -177,6 +186,12 @@ function matchesHook(hook: HookDefinition, payload: HookPayload): boolean {
   if (match.threadId !== undefined && match.threadId !== payload.thread.id) return false;
   if (match.kind !== undefined && match.kind !== (payload.input?.kind ?? "")) return false;
   if (match.status !== undefined && match.status !== payload.thread.status) return false;
+  if (
+    match.subagent !== undefined &&
+    match.subagent !== (payload.thread.relationship === "subagent")
+  ) {
+    return false;
+  }
   if (match.titlePattern !== undefined) {
     try {
       if (!new RegExp(match.titlePattern).test(payload.thread.title)) return false;
@@ -200,6 +215,8 @@ function runHook(hook: HookDefinition, payload: HookPayload): Promise<void> {
     T3_EVENT: payload.event,
     T3_THREAD_ID: payload.thread.id,
     T3_THREAD_TITLE: payload.thread.title,
+    T3_PARENT_THREAD_ID: payload.thread.parentThreadId ?? "",
+    T3_THREAD_RELATIONSHIP: payload.thread.relationship ?? "",
     T3_PROJECT_ID: payload.project?.id ?? "",
     T3_PROJECT_TITLE: payload.project?.title ?? "",
     T3_STATUS: payload.thread.status,
@@ -293,6 +310,8 @@ export function createHookRuntime(file: string): HookRuntime {
           location: asString(record?.location) ?? "active",
           threadId,
           threadTitle: asString(thread?.title) ?? "",
+          parentThreadId: asString(nested(thread, "lineage", "parentThreadId")) ?? null,
+          relationship: asString(nested(thread, "lineage", "relationshipToParent")) ?? null,
           project:
             projectId === undefined
               ? undefined
