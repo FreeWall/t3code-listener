@@ -63,12 +63,20 @@ interface ThreadState {
   readonly actionablePlan: boolean;
 }
 
+interface ProjectInfo {
+  readonly id: string;
+  readonly title: string;
+  readonly workspaceRoot: string | null;
+}
+
 interface HookPayload {
   readonly event: HookEventName;
   readonly sequence: number | undefined;
   readonly timestamp: string;
   readonly location: string;
-  readonly project: { readonly id: string; readonly title: string } | undefined;
+  /** Directory the agent works in: the thread's worktree, else the project's workspace root. */
+  readonly cwd: string | null;
+  readonly project: ProjectInfo | undefined;
   readonly thread: {
     readonly id: string;
     readonly title: string;
@@ -118,7 +126,8 @@ interface DetectionContext {
   readonly threadTitle: string;
   readonly parentThreadId: string | null;
   readonly relationship: string | null;
-  readonly project: { readonly id: string; readonly title: string } | undefined;
+  readonly worktreePath: string | null;
+  readonly project: ProjectInfo | undefined;
 }
 
 /** Computes hook events from a thread's previous and current shell state. */
@@ -132,6 +141,7 @@ function detectHookEvents(
     sequence: context.sequence,
     timestamp: new Date().toISOString(),
     location: context.location,
+    cwd: context.worktreePath ?? context.project?.workspaceRoot ?? null,
     project: context.project,
     thread: {
       id: context.threadId,
@@ -219,6 +229,7 @@ function runHook(hook: HookDefinition, payload: HookPayload): Promise<void> {
     T3_THREAD_RELATIONSHIP: payload.thread.relationship ?? "",
     T3_PROJECT_ID: payload.project?.id ?? "",
     T3_PROJECT_TITLE: payload.project?.title ?? "",
+    T3_CWD: payload.cwd ?? "",
     T3_STATUS: payload.thread.status,
     T3_INPUT_KIND: payload.input?.kind ?? "",
     T3_SEQUENCE: payload.sequence === undefined ? "" : String(payload.sequence),
@@ -266,7 +277,7 @@ export interface HookRuntime {
 export function createHookRuntime(file: string): HookRuntime {
   const hooks = loadHooks(file);
   const threadStates = new Map<string, ThreadState>();
-  const projects = new Map<string, { readonly id: string; readonly title: string }>();
+  const projects = new Map<string, ProjectInfo>();
 
   return {
     handleItem: (item) =>
@@ -280,9 +291,8 @@ export function createHookRuntime(file: string): HookRuntime {
           return;
         }
         if (kind === "project.updated") {
-          const project = asRecord(record?.project);
-          const id = asString(project?.id);
-          if (id !== undefined) projects.set(id, { id, title: asString(project?.title) ?? "" });
+          const project = projectInfo(record?.project);
+          if (project !== undefined) projects.set(project.id, project);
           return;
         }
         if (kind === "project.removed") {
@@ -312,10 +322,11 @@ export function createHookRuntime(file: string): HookRuntime {
           threadTitle: asString(thread?.title) ?? "",
           parentThreadId: asString(nested(thread, "lineage", "parentThreadId")) ?? null,
           relationship: asString(nested(thread, "lineage", "relationshipToParent")) ?? null,
+          worktreePath: asString(thread?.worktreePath) ?? null,
           project:
             projectId === undefined
               ? undefined
-              : (projects.get(projectId) ?? { id: projectId, title: "" }),
+              : (projects.get(projectId) ?? { id: projectId, title: "", workspaceRoot: null }),
         });
 
         for (const payload of payloads) {
@@ -331,7 +342,7 @@ export function createHookRuntime(file: string): HookRuntime {
 function seedSnapshot(
   snapshot: Record<string, unknown> | undefined,
   threadStates: Map<string, ThreadState>,
-  projects: Map<string, { readonly id: string; readonly title: string }>,
+  projects: Map<string, ProjectInfo>,
 ): void {
   for (const list of [snapshot?.threads, snapshot?.archivedThreads]) {
     if (!Array.isArray(list)) continue;
@@ -341,8 +352,18 @@ function seedSnapshot(
     }
   }
   if (!Array.isArray(snapshot?.projects)) return;
-  for (const project of snapshot.projects) {
-    const id = asString(nested(project, "id"));
-    if (id !== undefined) projects.set(id, { id, title: asString(nested(project, "title")) ?? "" });
+  for (const item of snapshot.projects) {
+    const project = projectInfo(item);
+    if (project !== undefined) projects.set(project.id, project);
   }
+}
+
+function projectInfo(project: unknown): ProjectInfo | undefined {
+  const id = asString(nested(project, "id"));
+  if (id === undefined) return undefined;
+  return {
+    id,
+    title: asString(nested(project, "title")) ?? "",
+    workspaceRoot: asString(nested(project, "workspaceRoot")) ?? null,
+  };
 }

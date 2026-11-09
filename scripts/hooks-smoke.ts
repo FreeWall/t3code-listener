@@ -9,8 +9,8 @@ const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3ls-hooks-"));
 const out = NodePath.join(dir, "events.txt");
 const hooksFile = NodePath.join(dir, "hooks.json");
 
-const command = `printf '%s|%s|%s\\n' "$T3_EVENT" "$T3_INPUT_KIND" "$T3_THREAD_TITLE" >> "${out}"`;
-const subagentCommand = `printf 'subagent|%s|%s|%s\\n' "$T3_EVENT" "$T3_PARENT_THREAD_ID" "$T3_THREAD_RELATIONSHIP" >> "${out}"`;
+const command = `printf '%s|%s|%s|%s\\n' "$T3_EVENT" "$T3_INPUT_KIND" "$T3_THREAD_TITLE" "$T3_CWD" >> "${out}"`;
+const subagentCommand = `printf 'subagent|%s|%s|%s|%s\\n' "$T3_EVENT" "$T3_PARENT_THREAD_ID" "$T3_THREAD_RELATIONSHIP" "$T3_CWD" >> "${out}"`;
 NodeFS.writeFileSync(
   hooksFile,
   JSON.stringify(
@@ -46,6 +46,7 @@ const subagentThread = (overrides: Record<string, unknown>) =>
     id: "t2",
     title: "Subagent",
     creationSource: "provider",
+    worktreePath: "/worktrees/t2",
     lineage: { parentThreadId: "t1", relationshipToParent: "subagent", rootThreadId: "t1" },
     ...overrides,
   });
@@ -55,7 +56,7 @@ const snapshot = {
   snapshot: {
     schemaVersion: 1,
     snapshotSequence: 1,
-    projects: [{ id: "p1", title: "Demo project" }],
+    projects: [{ id: "p1", title: "Demo project", workspaceRoot: "/repo" }],
     threads: [thread({}), subagentThread({})],
     archivedThreads: [],
   },
@@ -114,11 +115,11 @@ await Effect.runPromise(program);
 
 const lines = NodeFS.readFileSync(out, "utf8").trim().split("\n");
 const expected = [
-  "input.requested|user_input|Demo thread",
-  "turn.completed||Demo thread",
-  "turn.failed||Demo thread",
-  "turn.cancelled||Demo thread",
-  "subagent|turn.completed|t1|subagent",
+  "input.requested|user_input|Demo thread|/repo",
+  "turn.completed||Demo thread|/repo",
+  "turn.failed||Demo thread|/repo",
+  "turn.cancelled||Demo thread|/repo",
+  "subagent|turn.completed|t1|subagent|/worktrees/t2",
 ];
 
 console.log(lines.join("\n"));

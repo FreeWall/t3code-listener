@@ -143,7 +143,7 @@ Each hook takes:
 
 The event JSON is written to the command's stdin, and the same fields are exported as `T3_EVENT`,
 `T3_THREAD_ID`, `T3_THREAD_TITLE`, `T3_PARENT_THREAD_ID`, `T3_THREAD_RELATIONSHIP` (`subagent`, `fork`, or empty),
-`T3_PROJECT_ID`, `T3_PROJECT_TITLE`, `T3_STATUS`,
+`T3_PROJECT_ID`, `T3_PROJECT_TITLE`, `T3_CWD` (thread worktree, else project workspace root), `T3_STATUS`,
 `T3_INPUT_KIND`, `T3_SEQUENCE`, and `T3_TIMESTAMP`. Hooks run detached so a slow command never
 blocks the stream; non-zero exits and timeouts are logged.
 
