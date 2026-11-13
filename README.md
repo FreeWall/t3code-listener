@@ -5,7 +5,7 @@ shell events over the authenticated WebSocket RPC stream (`orchestration.subscri
 
 It is the same projection the T3 web/desktop/mobile clients use for their thread list: project and
 thread metadata plus status flags (work state, pending input/approval, plan review, settled). It never
-reads conversation bodies or workspace files.
+reads workspace files, and reads a thread's messages only for [silent threads](#silent-threads).
 
 ## Requirements
 
@@ -36,20 +36,21 @@ rather than retrying forever.
 
 ### Longer-lived token
 
-If you would rather not re-pair monthly, the T3 CLI can issue a bearer with a custom TTL. Run it on the host that
-owns the T3 data directory:
+If you would rather not re-pair monthly, the T3 CLI can issue a bearer with a custom TTL and exact scopes. Run it
+on the host that owns the T3 data directory:
 
 ```bash
-t3 auth session issue --ttl 365d --token-only --base-dir ~/.t3 > ~/.config/t3code-listener/bearer
+t3 auth session issue --scope orchestration:read --scope orchestration:operate \
+  --ttl 365d --token-only --base-dir ~/.t3 > ~/.config/t3code-listener/bearer
 chmod 600 ~/.config/t3code-listener/bearer
 yarn start --url http://localhost:3000 --bearer-file ~/.config/t3code-listener/bearer
 ```
 
 The listener caches that bearer by its own `exp`, so after this one command later runs need only `--url`.
 
-Note: `session issue` grants `AuthAdministrativeScopes` (all scopes, including terminal and file access), not the
-read-only `orchestration:read` the pairing flow yields. Treat the file as a secret, and prefer the read-only pairing
-flow unless you need the longer TTL. Revoke it with `t3 auth session revoke <session-id>` or Settings → Connections.
+Each `--scope` replaces the default set. `orchestration:read` is enough for hooks; `orchestration:operate` is
+needed only for [silent threads](#silent-threads), and it can also send messages and archive or delete threads.
+Treat the file as a secret. Revoke it with `t3 auth session revoke <session-id>` or Settings → Connections.
 
 ## Usage
 
@@ -140,6 +141,27 @@ Each hook takes:
 | `match.titlePattern` | JavaScript regex tested against the thread title. |
 | `match.subagent` | `true`: only subagent threads (`delegate_task` children and native provider subagents). `false`: only non-subagent threads. Omit for both. |
 | `timeoutMs` | Kill the command after this many ms (default 30000). |
+
+### Silent threads
+
+A top-level `silent` entry lets an agent opt a run out of notifying, e.g. a scheduled check that found
+nothing ends its reply with `[silent]`:
+
+```json
+{
+  "version": 1,
+  "hooks": [],
+  "silent": { "messagePattern": "\\[silent\\]\\s*$" }
+}
+```
+
+When a top-level thread's run completes, the listener reads the thread (`orchestration.getThreadProjection`)
+and tests its last assistant message against `messagePattern`, a JavaScript regex. On a match it skips that
+`turn.completed`'s hooks and marks the thread read (the app's `thread.visit` command), so it leaves the
+unread list. Other events still fire, and subagent threads are never read. The read returns the whole thread,
+so it costs one round-trip per completed run while `silent` is set. Marking read needs the `orchestration:operate` scope, which a read-only pairing link lacks: see
+[Longer-lived token](#longer-lived-token). Without it the hooks are still skipped and a warning is logged.
+A thread that cannot be read counts as not silent, so its hooks fire.
 
 The event JSON is written to the command's stdin, and the same fields are exported as `T3_EVENT`,
 `T3_THREAD_ID`, `T3_THREAD_TITLE`, `T3_PARENT_THREAD_ID`, `T3_THREAD_RELATIONSHIP` (`subagent`, `fork`, or empty),

@@ -3,7 +3,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 
-import { createHookRuntime } from "../src/hooks.ts";
+import { createHookRuntime, type ServerActions } from "../src/hooks.ts";
+import { lastAssistantText } from "../src/protocol.ts";
 
 const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3ls-hooks-"));
 const out = NodePath.join(dir, "events.txt");
@@ -23,6 +24,7 @@ NodeFS.writeFileSync(
         { event: "turn.failed", command },
         { event: "turn.cancelled", command },
       ],
+      silent: { messagePattern: "\\[silent\\]\\s*$" },
     },
     null,
     2,
@@ -99,13 +101,35 @@ const items = [
     location: "active",
     thread: subagentThread({ status: "completed" }),
   },
+  // A reply ending in [silent] is marked read instead of firing turn.completed hooks.
+  {
+    kind: "thread.updated",
+    sequence: 12,
+    location: "active",
+    thread: thread({ id: "t3", title: "Scheduled check" }),
+  },
+  {
+    kind: "thread.updated",
+    sequence: 13,
+    location: "active",
+    thread: thread({ id: "t3", title: "Scheduled check", status: "completed" }),
+  },
 ];
 
 const runtime = createHookRuntime(hooksFile);
+const markedRead: Array<string> = [];
+const replies: Record<string, string> = {
+  t1: "Fixed it. [silent] would only count at the end.",
+  t3: "Nothing new found.\n\n[silent]\n",
+};
+const server: ServerActions = {
+  lastAssistantMessage: (threadId) => Effect.succeed(replies[threadId]),
+  markRead: (threadId) => Effect.sync(() => void markedRead.push(threadId)),
+};
 
 const program = Effect.gen(function* () {
   for (const item of items) {
-    yield* runtime.handleItem(item);
+    yield* runtime.handleItem(item, server);
   }
   // Hooks are detached so the stream is never blocked; give them a moment to land.
   yield* Effect.sleep("1 second");
@@ -126,6 +150,24 @@ console.log(lines.join("\n"));
 if (JSON.stringify(lines) !== JSON.stringify(expected)) {
   console.error("HOOKS_SMOKE_FAIL");
   console.error("expected:", JSON.stringify(expected));
+  process.exit(1);
+}
+if (JSON.stringify(markedRead) !== JSON.stringify(["t3"])) {
+  console.error("HOOKS_SMOKE_FAIL");
+  console.error("marked read:", JSON.stringify(markedRead), "expected: [\"t3\"]");
+  process.exit(1);
+}
+const projection = {
+  messages: [
+    { role: "assistant", streaming: false, createdAt: "2026-11-13T10:00:02.000Z", text: "latest" },
+    { role: "assistant", streaming: false, createdAt: "2026-11-13T10:00:01.000Z", text: "older" },
+    { role: "user", streaming: false, createdAt: "2026-11-13T10:00:03.000Z", text: "user" },
+    { role: "assistant", streaming: true, createdAt: "2026-11-13T10:00:04.000Z", text: "partial" },
+  ],
+};
+if (lastAssistantText(projection) !== "latest") {
+  console.error("HOOKS_SMOKE_FAIL");
+  console.error("lastAssistantText:", lastAssistantText(projection), "expected: latest");
   process.exit(1);
 }
 console.log("HOOKS_SMOKE_OK");

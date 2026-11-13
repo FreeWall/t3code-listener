@@ -3,7 +3,13 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as RpcTest from "effect/unstable/rpc/RpcTest";
 
-import { ListenerRpcGroup, SUBSCRIBE_SHELL_TAG, sequenceOf } from "../src/protocol.ts";
+import {
+  DISPATCH_COMMAND_TAG,
+  GET_THREAD_PROJECTION_TAG,
+  ListenerRpcGroup,
+  SUBSCRIBE_SHELL_TAG,
+  sequenceOf,
+} from "../src/protocol.ts";
 
 const snapshot = {
   kind: "snapshot",
@@ -43,6 +49,8 @@ const threadUpdate = {
 
 const handlers = ListenerRpcGroup.toLayer({
   [SUBSCRIBE_SHELL_TAG]: () => Stream.make(snapshot, threadUpdate, { kind: "synchronized" }),
+  [DISPATCH_COMMAND_TAG]: () => Effect.succeed({}),
+  [GET_THREAD_PROJECTION_TAG]: () => Effect.succeed({ messages: [] }),
 });
 
 const program = Effect.gen(function* () {

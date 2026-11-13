@@ -53,7 +53,14 @@ type HookDefinition = Schema.Schema.Type<typeof HookDefinitionSchema>;
 const HookConfigSchema = Schema.Struct({
   version: Schema.optional(Schema.Literal(1)),
   hooks: Schema.Array(HookDefinitionSchema),
+  /**
+   * A top-level thread whose run completes with its last assistant message matching
+   * `messagePattern` is marked read and its `turn.completed` hooks are skipped. Lets an
+   * agent opt out of notifying.
+   */
+  silent: Schema.optional(Schema.Struct({ messagePattern: Schema.String })),
 });
+type HookConfig = Schema.Schema.Type<typeof HookConfigSchema>;
 
 interface ThreadState {
   readonly status: string;
@@ -89,8 +96,10 @@ interface HookPayload {
   readonly input?: { readonly kind: string; readonly requestId: string | null };
 }
 
+const EMPTY_CONFIG: HookConfig = { hooks: [] };
+
 /** Reads and validates the hooks file. Missing file means no hooks; invalid content is reported once. */
-function loadHooks(file: string): ReadonlyArray<HookDefinition> {
+function loadConfig(file: string): HookConfig {
   let text: string;
   try {
     text = NodeFS.readFileSync(file, "utf8");
@@ -98,13 +107,23 @@ function loadHooks(file: string): ReadonlyArray<HookDefinition> {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       console.warn(`could not read hooks file ${file}: ${String(error)}`);
     }
-    return [];
+    return EMPTY_CONFIG;
   }
   try {
-    return Schema.decodeUnknownSync(HookConfigSchema)(JSON.parse(text)).hooks;
+    return Schema.decodeUnknownSync(HookConfigSchema)(JSON.parse(text));
   } catch (error) {
     console.warn(`invalid hooks file ${file}: ${String(error)}`);
-    return [];
+    return EMPTY_CONFIG;
+  }
+}
+
+function compileSilentPattern(config: HookConfig): RegExp | undefined {
+  if (config.silent === undefined) return undefined;
+  try {
+    return new RegExp(config.silent.messagePattern);
+  } catch (error) {
+    console.warn(`invalid silent.messagePattern: ${String(error)}`);
+    return undefined;
   }
 }
 
@@ -264,9 +283,17 @@ function runHook(hook: HookDefinition, payload: HookPayload): Promise<void> {
   });
 }
 
+/** Server calls the runtime needs beyond the shell stream; bound to the live connection. */
+export interface ServerActions {
+  /** Text of the thread's latest assistant message, if it can be read. */
+  readonly lastAssistantMessage: (threadId: string) => Effect.Effect<string | undefined>;
+  /** Marks a thread read on the server, as opening it in the app would. */
+  readonly markRead: (threadId: string) => Effect.Effect<void>;
+}
+
 export interface HookRuntime {
   /** Updates tracked state for one shell stream item and dispatches matching hooks. */
-  handleItem(item: unknown): Effect.Effect<void>;
+  handleItem(item: unknown, server: ServerActions): Effect.Effect<void>;
 }
 
 /**
@@ -275,14 +302,40 @@ export interface HookRuntime {
  * which keeps reconnects quiet.
  */
 export function createHookRuntime(file: string): HookRuntime {
-  const hooks = loadHooks(file);
+  const config = loadConfig(file);
+  const hooks = config.hooks;
+  const silentPattern = compileSilentPattern(config);
   const threadStates = new Map<string, ThreadState>();
   const projects = new Map<string, ProjectInfo>();
 
+  /** Only a top-level completion is checked, so subagent runs cost no message fetch. */
+  const isSilent = (payload: HookPayload, server: ServerActions) =>
+    Effect.gen(function* () {
+      if (silentPattern === undefined) return false;
+      if (payload.event !== "turn.completed" || payload.thread.relationship === "subagent") {
+        return false;
+      }
+      const text = yield* server.lastAssistantMessage(payload.thread.id);
+      return text !== undefined && silentPattern.test(text);
+    });
+
+  const dispatch = (payload: HookPayload, server: ServerActions) =>
+    Effect.gen(function* () {
+      if (yield* isSilent(payload, server)) {
+        yield* server.markRead(payload.thread.id);
+        return;
+      }
+      const matching = hooks.filter((hook) => matchesHook(hook, payload));
+      yield* Effect.forEach(matching, (hook) => Effect.promise(() => runHook(hook, payload)), {
+        concurrency: "unbounded",
+        discard: true,
+      });
+    });
+
   return {
-    handleItem: (item) =>
+    handleItem: (item, server) =>
       Effect.gen(function* () {
-        if (hooks.length === 0) return;
+        if (hooks.length === 0 && silentPattern === undefined) return;
         const record = asRecord(item);
         const kind = asString(record?.kind);
 
@@ -330,10 +383,7 @@ export function createHookRuntime(file: string): HookRuntime {
         });
 
         for (const payload of payloads) {
-          for (const hook of hooks) {
-            if (!matchesHook(hook, payload)) continue;
-            yield* Effect.forkDetach(Effect.promise(() => runHook(hook, payload)));
-          }
+          yield* Effect.forkDetach(dispatch(payload, server));
         }
       }),
   };

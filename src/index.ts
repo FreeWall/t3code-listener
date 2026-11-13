@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -16,8 +17,15 @@ import {
   issueWebSocketTicket,
 } from "./auth.ts";
 import { ConfigError, resolveConfig, usage } from "./config.ts";
-import { createHookRuntime, type HookRuntime } from "./hooks.ts";
-import { ListenerRpcGroup, SUBSCRIBE_SHELL_TAG, sequenceOf } from "./protocol.ts";
+import { createHookRuntime, type HookRuntime, type ServerActions } from "./hooks.ts";
+import {
+  DISPATCH_COMMAND_TAG,
+  GET_THREAD_PROJECTION_TAG,
+  ListenerRpcGroup,
+  SUBSCRIBE_SHELL_TAG,
+  lastAssistantText,
+  sequenceOf,
+} from "./protocol.ts";
 import { clearCachedToken, readCachedToken, writeCachedSession } from "./tokenStore.ts";
 
 const RECONNECT_DELAY = "2 seconds";
@@ -121,6 +129,34 @@ function runSubscription(cursor: Ref.Ref<number | undefined>, hooks: HookRuntime
     );
     const body = Effect.gen(function* () {
       const client = yield* RpcClient.make(ListenerRpcGroup);
+      const server: ServerActions = {
+        // An unreadable thread counts as not silent, so its hooks still fire.
+        lastAssistantMessage: (threadId) =>
+          client[GET_THREAD_PROJECTION_TAG]({ threadId }).pipe(
+            Effect.map(lastAssistantText),
+            Effect.catchCause((cause) =>
+              Effect.sync(() => {
+                console.warn(`could not read thread ${threadId}:\n${Cause.pretty(cause)}`);
+                return undefined;
+              }),
+            ),
+          ),
+        // A read-only session is refused here; the silent thread then just stays unread.
+        markRead: (threadId) =>
+          client[DISPATCH_COMMAND_TAG]({
+            type: "thread.visit",
+            commandId: randomUUID(),
+            threadId,
+            visitedAt: new Date().toISOString(),
+          }).pipe(
+            Effect.asVoid,
+            Effect.catchCause((cause) =>
+              Effect.sync(() =>
+                console.warn(`could not mark thread ${threadId} read:\n${Cause.pretty(cause)}`),
+              ),
+            ),
+          ),
+      };
       const afterSequence = yield* Ref.get(cursor);
       yield* client[SUBSCRIBE_SHELL_TAG]({
         ...(afterSequence === undefined ? {} : { afterSequence }),
@@ -134,7 +170,7 @@ function runSubscription(cursor: Ref.Ref<number | undefined>, hooks: HookRuntime
                 current === undefined ? sequence : Math.max(current, sequence),
               );
             }
-            yield* hooks.handleItem(item);
+            yield* hooks.handleItem(item, server);
           }),
         ),
       );
